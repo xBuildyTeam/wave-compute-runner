@@ -145,7 +145,7 @@ function saveMeta(j) { try { fs.writeFileSync(path.join(j.dir, 'job.json'), JSON
 
 function createJob(p) {
   const runtime = p.runtime || 'shell';
-  if (!['shell', 'node', 'solidity', 'browser-bench', 'review'].includes(runtime)) throw new Error('unknown runtime');
+  if (!['shell', 'node', 'solidity', 'browser-bench', 'review', 'checks'].includes(runtime)) throw new Error('unknown runtime');
   const id = 'job_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
   const dir = path.join(JOBS_DIR, id); fs.mkdirSync(dir, { recursive: true });
   let cwd = path.join(dir, 'work');
@@ -192,6 +192,12 @@ async function startJob(j) {
   if (j.runtime === 'node') { exe = 'node'; exeArgs = j.args; }
   else if (j.runtime === 'browser-bench') { exe = 'node'; exeArgs = ['/runner/tools/browser-bench.js', JSON.stringify(j.options)]; }
   else if (j.runtime === 'review') { exe = 'node'; exeArgs = ['/runner/tools/review.js', JSON.stringify(j.options)]; }
+  else if (j.runtime === 'checks') {
+    // Built-in suites live in /runner/suites; a job can also upload its own suite.json.
+    const o = { ...j.options };
+    if (typeof o.suite === 'string' && !fs.existsSync(path.join(j.cwd, o.suite)) && /^[a-z0-9-]+$/.test(o.suite)) o.suite = `/runner/suites/${o.suite}.json`;
+    exe = 'node'; exeArgs = ['/runner/tools/checks.js', JSON.stringify(o)];
+  }
   else { exe = 'sh'; exeArgs = ['-c', [j.command, ...j.args].join(' ')]; }
   const child = spawn(exe, exeArgs, { cwd: j.cwd, env: childEnv(j.env), detached: true });
   j.child = child;

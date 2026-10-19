@@ -1,0 +1,186 @@
+{
+ "suite": "wave-core",
+ "grader": "qwen3_8_flash",
+ "facts": [
+  "Theta mainnet chain ID is 361.",
+  "BrainVault v3 contract: 0xDb8230f5A2859fCa29E0ae6C8521784c1a34DC90 (current vault). The older vault is 0x0126...1D31 and its cards stay readable.",
+  "Card references use the form vN:id, e.g. v3:6.",
+  "Wave Genesis v1 contract: 0xfe33d2b4279ec269f4beca499c7a7b704ab54397 on Theta mainnet.",
+  "Wavey gives 5 free questions per day; Wavey is reached at wave.theta and bots.oswave.io/wavey.",
+  "Wave sites: oswave.io, app.oswave.io, web.oswave.io, bots.oswave.io.",
+  "Wavey card set on BrainVault v3: design v3:5, listing v3:6, knowledge cards v3:7 to v3:50.",
+  "Wavey's replies are written by a chat model running off-chain (Theta EdgeCloud models), grounded in his public cards."
+ ],
+ "checks": [
+  {
+   "id": "waveos-bot-info",
+   "type": "http",
+   "title": "Wave OS botPublicInfo",
+   "url": "https://app.oswave.io/functions/botPublicInfo",
+   "method": "POST",
+   "body": {},
+   "repeat": 6,
+   "gapMs": 500,
+   "minSuccess": 1,
+   "expect": {
+    "status": 200,
+    "json": {
+     "ok": true
+    }
+   }
+  },
+  {
+   "id": "wavey-info",
+   "type": "http",
+   "title": "Wavey info (Wave Web)",
+   "url": "https://web.oswave.io/functions/botChat",
+   "method": "POST",
+   "body": {
+    "action": "info",
+    "name": "wave.theta",
+    "browserId": "00000000-0000-4000-8000-000000000001"
+   },
+   "repeat": 3,
+   "minSuccess": 1,
+   "expect": {
+    "status": 200,
+    "json": {
+     "bot": "Wavey"
+    }
+   }
+  },
+  {
+   "id": "wave-theta-bot-record",
+   "type": "tns",
+   "title": "wave.theta points at Wavey",
+   "name": "wave.theta",
+   "record": "wave.bot",
+   "equals": "v3:6"
+  },
+  {
+   "id": "wavey-listing-card",
+   "type": "card",
+   "title": "Wavey listing card v3:6",
+   "ref": "v3:6",
+   "kind": "bot_listing"
+  },
+  {
+   "id": "wavey-answers",
+   "type": "botchat",
+   "title": "Wavey answers via bots.oswave.io path (graded)",
+   "name": "wave.theta",
+   "questions": [
+    {
+     "q": "How many free questions can I ask you per day?",
+     "reference": "5 free questions per day."
+    },
+    {
+     "q": "What is the chain ID of Theta mainnet?",
+     "reference": "361."
+    },
+    {
+     "q": "Which BrainVault vault version is current, and can older cards still be read?",
+     "reference": "v3 is the current vault; older v2 cards remain readable."
+    },
+    {
+     "q": "What is Wave Genesis?",
+     "reference": "An AI whose weights and code live in a smart contract on Theta mainnet; any input (a .theta name, wallet or word) deterministically produces a unique 20x20 bot, and the same input always gives the same bot."
+    },
+    {
+     "q": "Where do your answers come from?",
+     "reference": "From Wavey's public knowledge cards minted on BrainVault on Theta, so answers can be checked against those cards."
+    }
+   ]
+  },
+  {
+   "id": "wavey-answers-direct",
+   "type": "botchat",
+   "title": "Wavey answers via Wave OS directly (graded)",
+   "name": "wave.theta",
+   "questions": [
+    {
+     "q": "How many free questions can I ask you per day?",
+     "reference": "5 free questions per day."
+    },
+    {
+     "q": "What is the chain ID of Theta mainnet?",
+     "reference": "361."
+    },
+    {
+     "q": "Which BrainVault vault version is current, and can older cards still be read?",
+     "reference": "v3 is the current vault; older v2 cards remain readable."
+    },
+    {
+     "q": "What is Wave Genesis?",
+     "reference": "An AI whose weights and code live in a smart contract on Theta mainnet; any input (a .theta name, wallet or word) deterministically produces a unique 20x20 bot, and the same input always gives the same bot."
+    },
+    {
+     "q": "Where do your answers come from?",
+     "reference": "From Wavey's public knowledge cards minted on BrainVault on Theta, so answers can be checked against those cards."
+    }
+   ],
+   "api": "waveos",
+   "botId": "6acdb606379f2a8259af292e"
+  },
+  {
+   "id": "genesis-deterministic",
+   "type": "eth_call",
+   "title": "Genesis v1 dreams the same bot every time",
+   "to": "0xfe33d2b4279ec269f4beca499c7a7b704ab54397",
+   "sig": "svg(bytes32)",
+   "repeat": 2,
+   "minHexLen": 200,
+   "inputs": [
+    {
+     "name": "wave.theta"
+    },
+    {
+     "text": "eddie"
+    },
+    {
+     "text": "theta"
+    }
+   ]
+  },
+  {
+   "id": "llm-flash",
+   "type": "llm",
+   "title": "Qwen3.8-Flash reference set",
+   "model": "qwen3_8_flash",
+   "prompts": [
+    {
+     "q": "A shop sells pens at 3 for $2. How much do 12 pens cost? Answer with the number only.",
+     "reference": "$8"
+    },
+    {
+     "q": "If today is Monday, what day is it 10 days from now? Answer with the day only.",
+     "reference": "Thursday"
+    },
+    {
+     "q": "Return only JSON, no other text: {\"tool\":\"search\",\"query\":\"...\"} to search for \"Theta EdgeCloud pricing\".",
+     "reference": "{\"tool\":\"search\",\"query\":\"Theta EdgeCloud pricing\"} with no other text"
+    }
+   ]
+  },
+  {
+   "id": "llm-glm-flash",
+   "type": "llm",
+   "title": "GLM 5.3-Flash reference set",
+   "model": "glm_5_3_flash",
+   "prompts": [
+    {
+     "q": "A shop sells pens at 3 for $2. How much do 12 pens cost? Answer with the number only.",
+     "reference": "$8"
+    },
+    {
+     "q": "If today is Monday, what day is it 10 days from now? Answer with the day only.",
+     "reference": "Thursday"
+    },
+    {
+     "q": "Return only JSON, no other text: {\"tool\":\"search\",\"query\":\"...\"} to search for \"Theta EdgeCloud pricing\".",
+     "reference": "{\"tool\":\"search\",\"query\":\"Theta EdgeCloud pricing\"} with no other text"
+    }
+   ]
+  }
+ ]
+}

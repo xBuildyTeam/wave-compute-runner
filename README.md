@@ -18,11 +18,13 @@ Jobs keep running after the caller disconnects; poll for results.
 | `GET /jobs/:id/file?path=P` | download one output file (max 20 MB) |
 | `DELETE /jobs/:id` | cancel |
 
-Runtimes: `shell`, `node`, `solidity`, `browser-bench`, `review`.
+Runtimes: `shell`, `node`, `solidity`, `browser-bench`, `review`, `checks`.
 - `workspace: "name"` reuses a persistent folder across jobs (keep npm installs, caches).
 - `fromJob` copies a finished job's output files (default `results.json`) into the new job.
 - `browser-bench` options `{models:[index], engine:"wasm"|"webgpu", perModelTimeoutSec}` runs the Wave Lite AI benchmark page in headless Chromium (served with COOP/COEP, so the CPU path is multi-threaded) and writes `results.json`. Models stay cached in `/workspace/chrome-profile`.
 - `review` uses Theta EdgeCloud on-demand models (`qwen3_8_flash` default, `qwen3_8_max`). `{mode:"bench", input:"results.json"}` grades every answer against reference answers and writes `review.json`. `{mode:"chat", requests:[{id, messages, max_tokens}]}` writes `responses.json`. Cost comes from Theta's own `cost_usd`.
+
+- `checks` options `{suite: "wave-core" | "suite.json", compareTo?: "report.json", grader?}` runs a wave.checks suite (types: http with repeat + success rate, card live check, tns record, botchat graded against references via the Wave Web path or straight to Wave OS, llm reference sets per Theta model, eth_call determinism). Writes report.json, report.md and training-failures.jsonl (each wrong answer with its reference, for card fixes or fine-tuning). Use a `workspace` plus `compareTo:"report.json"` to flag regressions and fixes between runs. Built-in suites live in `suites/`.
 
 Preinstalled: Node 22, solc loader, Chromium, Ganache 7.9.2, ethers 6.
 

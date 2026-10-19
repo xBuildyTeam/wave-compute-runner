@@ -17,5 +17,6 @@ WORKDIR /workspace
 COPY runner-server.js /runner/runner-server.js
 COPY tools /runner/tools
 COPY bench /runner/bench
+COPY suites /runner/suites
 EXPOSE 8080
 CMD ["node", "/runner/runner-server.js"]
