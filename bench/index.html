@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wave Lite AI · Phone Benchmark</title>
+<style>
+  :root { --bg:#0b1020; --card:#121a2e; --line:#23304d; --text:#e6edf7; --muted:#8a9bb8; --cyan:#22D3EE; --violet:#8B5CF6; --bad:#f87171; --ok:#34d399; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:18px 14px 60px; }
+  h1 { font-size:22px; margin:4px 0 2px; } h1 span { color:var(--cyan); }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  select, button { font:inherit; border-radius:8px; border:1px solid var(--line); background:#0e1526; color:var(--text); padding:10px 12px; }
+  select { width:100%; }
+  button { cursor:pointer; }
+  button.primary { background:var(--cyan); color:#04202a; border:0; font-weight:700; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; }
+  .stat { background:#0e1526; border:1px solid var(--line); border-radius:10px; padding:10px; }
+  .stat b { display:block; font-size:18px; color:var(--cyan); }
+  .stat small { color:var(--muted); font-size:11px; }
+  .bar { height:8px; background:#0e1526; border-radius:6px; overflow:hidden; border:1px solid var(--line); }
+  .bar i { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--cyan),var(--violet)); transition:width .2s; }
+  pre { white-space:pre-wrap; word-break:break-word; background:#0e1526; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12.5px; margin:6px 0 0; max-height:220px; overflow:auto; }
+  .muted { color:var(--muted); font-size:12.5px; }
+  .bad { color:var(--bad); } .ok { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Wave Lite AI <span>benchmark</span></h1>
+  <div class="sub">Runs a small AI model fully inside this browser and measures real speed. Nothing is sent to a server; the model downloads once and is cached.</div>
+
+  <div class="card">
+    <div class="grid" id="device"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:2;min-width:220px"><label>Model</label><select id="model"></select></div>
+      <div style="flex:1;min-width:140px"><label>Engine</label>
+        <select id="engine"><option value="auto">Auto (GPU if available)</option><option value="webgpu">WebGPU (GPU)</option><option value="wasm">WASM (CPU)</option></select></div>
+    </div>
+    <p class="muted" id="modelNote" style="margin:8px 0 0"></p>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="run">Run benchmark</button>
+      <button id="copy" disabled>Copy results</button>
+      <button id="clear">Clear history</button>
+    </div>
+    <div style="margin-top:12px"><div class="bar"><i id="bar"></i></div><div class="muted" id="status" style="margin-top:6px">Pick a model and tap Run. Use Wi-Fi: downloads are 250 MB to 1.4 GB.</div></div>
+  </div>
+
+  <div class="card" id="summary" hidden><div class="grid" id="sumGrid"></div></div>
+  <div id="prompts"></div>
+
+  <div class="card">
+    <b>History on this device</b>
+    <div class="muted" style="margin:4px 0 8px">Every finished run is saved here so you can compare models. "Copy results" copies all of them as JSON.</div>
+    <table><thead><tr><th>Model</th><th>Engine</th><th>Load</th><th>First token</th><th>Speed</th></tr></thead><tbody id="hist"></tbody></table>
+  </div>
+</main>
+
+<script type="module">
+import { pipeline, TextStreamer, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
+env.allowLocalModels = false;
+
+// Download sizes measured from the Hugging Face repos (MB). gpu = q4f16 for WebGPU, cpu = q4 for WASM.
+const MODELS = [
+  { id:'onnx-community/gemma-3-270m-it-ONNX', name:'Gemma 3 270M', gpu:273, cpu:null, gpuOnly:true, note:'Smallest. GPU only (its format does not load on the CPU path).' },
+  { id:'onnx-community/LFM2-350M-ONNX', name:'LFM2 350M (Liquid)', gpu:255, cpu:null, gpuOnly:true, note:'Built for on-device use. Small and quick.' },
+  { id:'HuggingFaceTB/SmolLM2-360M-Instruct', name:'SmolLM2 360M', gpu:273, cpu:388, note:'Popular tiny baseline.' },
+  { id:'onnx-community/Qwen3-0.6B-ONNX', name:'Qwen3 0.6B', gpu:570, cpu:919, note:'Best candidate for tool calls at this size. Thinking turned off.', qwen3:true },
+  { id:'onnx-community/gemma-3-1b-it-ONNX', name:'Gemma 3 1B', gpu:763, cpu:null, gpuOnly:true, note:'Stronger answers, needs a recent phone.' },
+  { id:'onnx-community/Llama-3.2-1B-Instruct-ONNX', name:'Llama 3.2 1B', gpu:1090, cpu:1693, note:'Large download. GPU recommended.' },
+  { id:'onnx-community/Qwen3-1.7B-ONNX', name:'Qwen3 1.7B', gpu:1426, cpu:null, note:'High-end phones and laptops only. GPU only.', qwen3:true, gpuOnly:true },
+];
+
+const PROMPTS = [
+  { id:'math', text:'A shop sells pens at 3 for $2. How much do 12 pens cost? Answer with the number only.', expect:'8' },
+  { id:'date', text:'If today is Monday, what day is it 10 days from now? Answer with the day only.', expect:'thursday' },
+  { id:'json', text:'Return only JSON, no other text: {"tool":"search","query":"..."} to search for "Theta EdgeCloud pricing".', expect:'"tool"' },
+  { id:'fact', text:'In two sentences, what is a blockchain?', expect:null },
+  { id:'sum',  text:'Summarize in 10 words or fewer: Local AI runs on your own device, so it works offline, keeps data private and costs nothing per question.', expect:null },
+];
+
+const $ = id => document.getElementById(id);
+const sel = $('model');
+MODELS.forEach((m,i) => { const o=document.createElement('option'); o.value=i; o.textContent=`${m.name} (${m.gpu} MB GPU${m.cpu?` / ${m.cpu} MB CPU`:''})`; sel.appendChild(o); });
+sel.value = 3;
+const showNote = () => { $('modelNote').textContent = MODELS[sel.value].note; };
+sel.onchange = showNote; showNote();
+
+// Device info
+const device = { ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null, memoryGB:navigator.deviceMemory||null, webgpu:false, gpu:null, isolated:self.crossOriginIsolated };
+async function detect() {
+  if (navigator.gpu) {
+    try { const a = await navigator.gpu.requestAdapter(); if (a) { device.webgpu = true; const info = a.info || (a.requestAdapterInfo ? await a.requestAdapterInfo() : {}); device.gpu = [info.vendor, info.architecture, info.description].filter(Boolean).join(' ') || 'available'; } } catch {}
+  }
+  const tiles = [
+    ['WebGPU', device.webgpu ? '<span class="ok">Yes</span>' : '<span class="bad">No</span>', device.gpu || 'CPU only'],
+    ['CPU cores', device.cores ?? '?', 'reported by browser'],
+    ['Memory', device.memoryGB ? device.memoryGB+' GB+' : '?', 'rounded by browser'],
+    ['Threads', device.isolated ? 'Multi' : 'Single', device.isolated ? 'fast CPU path' : 'CPU path is slower here'],
+  ];
+  $('device').innerHTML = tiles.map(t => `<div class="stat"><small>${t[0]}</small><b>${t[1]}</b><small>${t[2]}</small></div>`).join('');
+}
+await detect();
+
+function renderPrompts() {
+  $('prompts').innerHTML = PROMPTS.map(p => `<div class="card"><div class="muted">${p.id.toUpperCase()} · ${p.text}</div><pre id="out-${p.id}">waiting</pre><div class="muted" id="m-${p.id}"></div></div>`).join('');
+}
+renderPrompts();
+
+const history = JSON.parse(localStorage.getItem('waveLiteBench') || '[]');
+function renderHistory() {
+  $('hist').innerHTML = history.slice().reverse().map(r => `<tr><td>${r.model}</td><td>${r.engine}</td><td>${(r.load_ms/1000).toFixed(1)}s</td><td>${r.avg_ttft_ms} ms</td><td><b>${r.avg_decode_tps}</b> tok/s</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No runs yet</td></tr>';
+  $('copy').disabled = history.length === 0;
+}
+renderHistory();
+$('clear').onclick = () => { history.length = 0; localStorage.removeItem('waveLiteBench'); renderHistory(); };
+$('copy').onclick = async () => {
+  const txt = JSON.stringify({ tool:'wave-lite-ai-bench/1', device, runs:history }, null, 2);
+  try { await navigator.clipboard.writeText(txt); $('status').textContent = 'Copied. Paste it to Wave44.'; }
+  catch { const w = window.open(); w.document.write('<pre>'+txt.replace(/</g,'&lt;')+'</pre>'); }
+};
+
+const setBar = (p, msg) => { $('bar').style.width = Math.max(0,Math.min(100,p))+'%'; if (msg) $('status').textContent = msg; };
+
+$('run').onclick = async () => {
+  const m = MODELS[sel.value];
+  let engine = $('engine').value;
+  if (engine === 'auto') engine = device.webgpu ? 'webgpu' : 'wasm';
+  if (engine === 'webgpu' && !device.webgpu) { setBar(0, 'This browser has no WebGPU. Pick WASM (CPU).'); return; }
+  if (engine === 'wasm' && m.gpuOnly) { setBar(0, `${m.name} needs WebGPU. On CPU, pick SmolLM2 360M or Qwen3 0.6B.`); return; }
+  const dtypes = engine === 'webgpu' ? ['q4f16','q4'] : ['q4','q8'];
+  let dtype = dtypes[0];
+  $('run').disabled = true; renderPrompts(); $('summary').hidden = true;
+
+  const files = {}; let fromNetwork = false;
+  const t0 = performance.now();
+  let gen;
+  try {
+    setBar(2, `Downloading ${m.name} (${engine==='webgpu'?m.gpu:m.cpu} MB). First time only.`);
+    let lastErr;
+    for (const d of dtypes) {
+      try {
+        dtype = d;
+        gen = await pipeline('text-generation', m.id, {
+      device: engine, dtype,
+      progress_callback: e => {
+        if (e.status === 'progress' && e.total) {
+          fromNetwork = true; files[e.file] = { loaded:e.loaded, total:e.total };
+          const L = Object.values(files).reduce((a,f)=>a+f.loaded,0), T = Object.values(files).reduce((a,f)=>a+f.total,0);
+          setBar(5 + 75*L/T, `Downloading ${(L/1e6).toFixed(0)} / ${(T/1e6).toFixed(0)} MB`);
+        } else if (e.status === 'ready') setBar(82, 'Starting the model...');
+      },
+    });
+        break;
+      } catch (e2) { lastErr = e2; gen = null; setBar(3, `That format did not load here, trying another (${d} failed)...`); }
+    }
+    if (!gen) throw lastErr;
+  } catch (err) {
+    setBar(0, 'Could not load this model here: ' + (err?.message || err) + '. Try a smaller model or the other engine.');
+    $('run').disabled = false; return;
+  }
+  const loadMs = Math.round(performance.now() - t0);
+  const downloadedMB = Math.round(Object.values(files).reduce((a,f)=>a+f.total,0)/1e6);
+
+  // Warm-up (not counted): first GPU run compiles shaders
+  setBar(85, 'Warming up (not counted)...');
+  try { await gen([{ role:'user', content:'Hi' + (m.qwen3?' /no_think':'') }], { max_new_tokens:4, do_sample:false }); } catch {}
+
+  const results = [];
+  for (let i = 0; i < PROMPTS.length; i++) {
+    const p = PROMPTS[i];
+    setBar(88 + 12*i/PROMPTS.length, `Running prompt ${i+1} of ${PROMPTS.length}...`);
+    const out = $('out-'+p.id); out.textContent = '';
+    let n = 0, tFirst = 0, tLast = 0, text = '';
+    const streamer = new TextStreamer(gen.tokenizer, {
+      skip_prompt: true, skip_special_tokens: true,
+      callback_function: s => { text += s; out.textContent = text.replace(/<think>[\s\S]*?(<\/think>|$)/g,'').trim(); },
+      token_callback_function: () => { const now = performance.now(); if (!n) tFirst = now; tLast = now; n++; },
+    });
+    const tStart = performance.now();
+    try {
+      await gen([{ role:'user', content:p.text + (m.qwen3?' /no_think':'') }], { max_new_tokens:96, do_sample:false, repetition_penalty:1.1, streamer });
+    } catch (err) { out.textContent = 'Error: ' + (err?.message||err); }
+    const clean = text.replace(/<think>[\s\S]*?<\/think>/g,'').trim();
+    const ttft = n ? Math.round(tFirst - tStart) : null;
+    const tps = n > 1 ? +( (n-1) / ((tLast - tFirst)/1000) ).toFixed(1) : null;
+    const pass = p.expect ? clean.toLowerCase().includes(p.expect) : null;
+    results.push({ id:p.id, tokens:n, ttft_ms:ttft, decode_tps:tps, pass, output:clean });
+    $('m-'+p.id).innerHTML = `${n} tokens · first token ${ttft} ms · <b>${tps ?? '?'} tok/s</b>` + (pass===null?'':pass?' · <span class="ok">correct</span>':' · <span class="bad">wrong</span>');
+  }
+
+  const ok = results.filter(r => r.decode_tps);
+  const avg = k => ok.length ? +(ok.reduce((a,r)=>a+r[k],0)/ok.length).toFixed(1) : null;
+  const run = {
+    at: new Date().toISOString(), model:m.name, repo:m.id, engine, dtype,
+    load_ms: loadMs, cached: !fromNetwork, downloaded_mb: downloadedMB,
+    avg_ttft_ms: Math.round(avg('ttft_ms')), avg_decode_tps: avg('decode_tps'),
+    correct: results.filter(r=>r.pass===true).length + ' of ' + results.filter(r=>r.pass!==null).length,
+    results,
+  };
+  history.push(run); localStorage.setItem('waveLiteBench', JSON.stringify(history)); renderHistory();
+  $('sumGrid').innerHTML = [
+    ['Speed', run.avg_decode_tps+' tok/s', 'average while writing'],
+    ['First token', run.avg_ttft_ms+' ms', 'time before it starts'],
+    ['Load', (loadMs/1000).toFixed(1)+' s', run.cached ? 'from cache' : downloadedMB+' MB downloaded'],
+    ['Checks', run.correct, 'math, date, JSON'],
+  ].map(t => `<div class="stat"><small>${t[0]}</small><b>${t[1]}</b><small>${t[2]}</small></div>`).join('');
+  $('summary').hidden = false;
+  setBar(100, `Done: ${m.name} on ${engine.toUpperCase()}. Try another model, then tap Copy results.`);
+  $('run').disabled = false;
+  try { await gen.dispose?.(); } catch {}
+};
+</script>
+</body>
+</html>
